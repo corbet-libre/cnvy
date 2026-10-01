@@ -5,6 +5,8 @@ use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Config {
+    /// Fresh per-instance entropy from the embedding runtime; not a timestamp.
+    pub retry_entropy: u64,
     pub refresh_seconds: u64,
     pub poll_seconds: u64,
     pub request_seconds: u64,
@@ -92,6 +94,7 @@ pub struct Follower {
     retry_delay: u64,
     target_revision: u64,
     target_epoch: u64,
+    retry_entropy: u64,
 }
 impl Follower {
     pub fn new(config: Config) -> Result<Self> {
@@ -108,6 +111,7 @@ impl Follower {
             retry_delay: config.initial_backoff_seconds,
             target_revision: 0,
             target_epoch: 0,
+            retry_entropy: config.retry_entropy,
         })
     }
     fn observe(&mut self, now: u64) -> Result<()> {
@@ -163,7 +167,7 @@ impl Follower {
                 return Ok(None);
             }
             self.pending = None;
-            self.backoff(now, 0)?;
+            self.backoff(now, self.retry_entropy)?;
             return Ok(None);
         }
         if now < self.next_attempt {
@@ -185,7 +189,7 @@ impl Follower {
         }
         self.pending = None;
         if now >= request.deadline {
-            self.backoff(now, 0)?;
+            self.backoff(now, self.retry_entropy)?;
             return Err(Error::Timeout);
         }
         Ok(request)
@@ -207,8 +211,9 @@ impl Follower {
         Ok(())
     }
     pub fn failed(&mut self, id: u64, now: u64, jitter: u64) -> Result<()> {
+        self.retry_entropy = jitter;
         self.take(id, now)?;
-        self.backoff(now, jitter)
+        self.backoff(now, self.retry_entropy)
     }
     /// Treat announced revisions as refresh hints, never as authenticated floors.
     pub fn on_change(&mut self, revision: u64, current_revision: u64, now: u64) -> Result<()> {
@@ -250,14 +255,15 @@ impl Follower {
         self.next_refresh = now;
         Ok(())
     }
-    /// Epoch hints cannot become verified authority or bypass retry limits.
+    /// Untrusted hints are capped at one epoch beyond current verified material.
+    /// They cannot become authority, pin an arbitrary floor or bypass retry limits.
     pub fn on_policy_epoch(&mut self, epoch: u64, current_epoch: u64, now: u64) -> Result<()> {
         self.observe(now)?;
         if self.state == State::Stopped {
             return Err(Error::Stopped);
         }
         if epoch > current_epoch {
-            self.target_epoch = self.target_epoch.max(epoch);
+            self.target_epoch = self.target_epoch.max(current_epoch.saturating_add(1));
             self.refresh(now)?;
         }
         Ok(())
@@ -272,7 +278,7 @@ impl Follower {
     ) -> Result<()> {
         let request = self.take(id, now)?;
         if request.action != Action::Fetch {
-            self.backoff(now, 0)?;
+            self.backoff(now, self.retry_entropy)?;
             return Err(Error::Response);
         }
         match charter.install(bytes, authority, now) {
@@ -294,11 +300,11 @@ impl Follower {
                 Ok(())
             }
             Ok(_) => {
-                self.backoff(now, 0)?;
+                self.backoff(now, self.retry_entropy)?;
                 Err(Error::BehindAnnouncement)
             }
             Err(e) => {
-                self.backoff(now, 0)?;
+                self.backoff(now, self.retry_entropy)?;
                 Err(Error::Trust(e))
             }
         }
@@ -324,7 +330,7 @@ impl Follower {
             self.on_change(a.revision, revision, now)
         })();
         if result.is_err() {
-            self.backoff(now, 0)?;
+            self.backoff(now, self.retry_entropy)?;
         }
         result
     }

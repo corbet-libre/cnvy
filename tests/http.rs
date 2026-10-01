@@ -19,6 +19,7 @@ fn config() -> Config {
         request_seconds: 26,
         initial_backoff_seconds: 2,
         maximum_backoff_seconds: 16,
+        retry_entropy: 0,
         maximum_staleness_seconds: 60,
     }
 }
@@ -77,7 +78,7 @@ async fn real_https_fetch_bootstraps_without_member_headers_or_redirects() {
     let mut s = signer();
     let content = bytes(&feed(&mut s, 10, 1));
     let mut reply = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         content.len()
     )
     .into_bytes();
@@ -111,7 +112,7 @@ async fn real_https_fetch_bootstraps_without_member_headers_or_redirects() {
 #[tokio::test]
 async fn redirect_and_oversize_responses_are_refused() {
     for reply in [b"HTTP/1.1 307 Temporary Redirect\r\nLocation: https://127.0.0.1:9/\r\nContent-Length: 0\r\n\r\n".to_vec(),
-        b"HTTP/1.1 200 OK\r\nContent-Length: 999999999\r\n\r\n".to_vec()] {
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 999999999\r\n\r\n".to_vec()] {
         let (origin,root,server)=server(reply).await;
         let http=Http::with_roots(&origin,"alpha",&[root]).unwrap();
         let mut a=Assurance::new(&origin,"alpha",config()).unwrap();let request=a.start(NOW).unwrap();
@@ -126,7 +127,7 @@ async fn redirect_and_oversize_responses_are_refused() {
 async fn chunked_announcements_enforce_the_bound_without_a_length_header() {
     let body = vec![b' '; 2048];
     let mut reply = format!(
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n",
         body.len()
     )
     .into_bytes();
@@ -160,7 +161,7 @@ async fn chunked_announcements_enforce_the_bound_without_a_length_header() {
 async fn malformed_authority_and_late_requests_are_refused() {
     for content in [b"{}".to_vec(), br#"{"revision":1,"key_ring":[]}"#.to_vec()] {
         let mut reply = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             content.len()
         )
         .into_bytes();
@@ -183,7 +184,7 @@ async fn malformed_authority_and_late_requests_are_refused() {
 async fn announcement_response_cannot_bootstrap_authority() {
     let content = br#"{"revision":10,"policy_epoch":1,"changed":false}"#;
     let mut reply = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         content.len()
     )
     .into_bytes();
@@ -230,7 +231,7 @@ async fn real_connection_and_truncated_body_failures_are_refused() {
     ));
 
     let (origin, root, server) = server(
-        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial".to_vec(),
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial".to_vec(),
     )
     .await;
     let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
@@ -247,4 +248,35 @@ fn malformed_operator_certificate_is_rejected_by_the_real_tls_builder() {
         Http::with_roots("https://localhost", "alpha", &[vec![]]),
         Err(Error::Network)
     ));
+}
+
+#[tokio::test]
+async fn real_tls_requires_json_media_type_even_for_a_success_response() {
+    for content_type in [
+        None,
+        Some("text/html"),
+        Some("application/jsonish"),
+        Some("APPLICATION/JSON; charset=utf-8"),
+    ] {
+        let header = content_type
+            .map(|value| format!("Content-Type: {value}\r\n"))
+            .unwrap_or_default();
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\n{header}Content-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+        )
+        .into_bytes();
+        let (origin, root, server) = server(reply).await;
+        let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+        let request = cnvy::feed::Follower::new(config())
+            .unwrap()
+            .start(NOW)
+            .unwrap();
+        let response = http.execute(request, NOW).await;
+        if content_type == Some("APPLICATION/JSON; charset=utf-8") {
+            assert_eq!(response.unwrap().bytes(), b"{}");
+        } else {
+            assert!(matches!(response, Err(Error::Response)));
+        }
+        server.await.unwrap();
+    }
 }
