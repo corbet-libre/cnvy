@@ -26,12 +26,14 @@ current one. The runtime must obey cancellation to preserve the I/O bound.
 
 `http::Http` (optional native `http` feature) accepts only an exact HTTPS origin,
 uses reqwest with redirect refusal, no ambient credentials, cookies, proxy or
-referrer, no retry middleware, a generic User-Agent, ten-second connect timeout
+referrer, explicit reqwest retry refusal, a generic User-Agent, ten-second connect timeout
 and remaining request deadline as total timeout. Only configured origin plus the
 two fixed paths can be requested. Body collection is checked chunk by chunk, not
 merely against Content-Length: at most cchr's 32 MiB for a feed and 1024 bytes for
 an announcement. All non-success statuses fail. Explicit operator CA roots may
 supplement the public store; certificate and hostname checks stay enabled.
+Origin validation and canonicalization use Charter's existing constructor and
+configured-origin accessor; invalid input retains the same Charter error.
 
 A `Received` has no public constructor. Its `authority(receive_time, fresh_for)`
 converts only a successful HTTPS feed response into cchr's privileged origin
@@ -94,10 +96,11 @@ The cnvy job replays captures; cchr separately launches the actual door.
 source and per-file SHA-256; CI verifies these hashes before testing. No mocked
 verification verdicts or cvld server dependency enter the consumer graph.
 
-G1 remains open at the cgrd/cvld owner: the guard needs a verified-input adapter
-for the original full cplc policy plus separate revocations. No re-signing, lossy
-conversion or alternate admission evaluator exists here; attendance must refuse
-`UnsupportedPolicy`. The full cvld→guard→forum acceptance path is therefore not
-claimed. Production TLS bootstrap provisioning, browser transport and embedding
+Charter exposes a borrowed Guard policy containing the original signed full
+settings and separate revocations. Guard verifies these envelopes, the device
+signature and the profile, then delegates rich policy to Rulebook. These captures
+verify byte preservation; they do not assert admission without a valid bundle.
+The full cvld→guard→forum path still requires the door owner's current device
+registration authority and matching signed credential evidence. Production TLS bootstrap provisioning, browser transport and embedding
 cancellation/scheduling are adapter integration responsibilities. No deployment,
 registry publication, payments or external test accounts are involved.

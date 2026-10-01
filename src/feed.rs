@@ -169,10 +169,8 @@ impl Follower {
         if now < self.next_attempt {
             return Ok(None);
         }
-        let action = if now >= self.next_refresh
-            || self.last_success.is_none()
-            || self.target_revision > revision
-        {
+        // Start, failures and every newer hint set next_refresh immediately.
+        let action = if now >= self.next_refresh {
             Action::Fetch
         } else {
             Action::Poll { revision }

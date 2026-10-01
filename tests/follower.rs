@@ -163,3 +163,145 @@ fn member_epoch_hint_forces_refresh_without_becoming_authority() {
         .unwrap();
     assert_eq!(a.current(NOW + 4).unwrap().policy_epoch(), 2);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn configuration_and_stopped_operations_are_explicit() {
+    for case in 0..8 {
+        let mut invalid = config();
+        match case {
+            0 => invalid.refresh_seconds = 0,
+            1 => invalid.poll_seconds = 0,
+            2 => invalid.request_seconds = 25,
+            3 => invalid.initial_backoff_seconds = 0,
+            4 => invalid.maximum_backoff_seconds = 1,
+            5 => invalid.maximum_backoff_seconds = 86401,
+            6 => invalid.maximum_staleness_seconds = 1,
+            _ => invalid.maximum_staleness_seconds = 86401,
+        }
+        assert!(matches!(
+            cnvy::feed::Follower::new(invalid),
+            Err(Error::Configuration)
+        ));
+    }
+    let mut follower = cnvy::feed::Follower::new(config()).unwrap();
+    assert_eq!(follower.next(0, NOW), Ok(None));
+    assert_eq!(follower.on_change(1, 0, NOW), Err(Error::Stopped));
+    assert_eq!(follower.refresh(NOW), Err(Error::Stopped));
+    assert_eq!(follower.on_policy_epoch(1, 0, NOW), Err(Error::Stopped));
+    assert_eq!(follower.permits_current(0, 0, NOW), Err(Error::Unavailable));
+    let r = follower.start(NOW).unwrap();
+    assert_eq!(follower.permits_current(0, 0, NOW), Err(Error::Unavailable));
+    assert_eq!(follower.start(NOW), Err(Error::Busy));
+    assert_eq!(follower.failed(r.id() + 1, NOW, 0), Err(Error::Obsolete));
+    assert_eq!(
+        follower.failed(r.id(), r.deadline(), 0),
+        Err(Error::Timeout)
+    );
+    assert_eq!(Error::Timeout.to_string(), "Timeout");
+    assert!(matches!(
+        cnvy::feed::Follower::new(config()).unwrap().start(u64::MAX),
+        Err(Error::Exhausted)
+    ));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn response_types_and_every_announcement_field_are_checked() {
+    let mut follower = cnvy::feed::Follower::new(config()).unwrap();
+    let r = follower.start(NOW).unwrap();
+    assert_eq!(
+        follower.announcement(r.id(), b"{}", NOW),
+        Err(Error::Response)
+    );
+    let candidates = [
+        vec![b' '; 1025],
+        b"not JSON".to_vec(),
+        br#"{"revision":10,"policy_epoch":0,"changed":false}"#.to_vec(),
+        br#"{"revision":9,"policy_epoch":1,"changed":false}"#.to_vec(),
+        br#"{"revision":10,"policy_epoch":1,"changed":true}"#.to_vec(),
+    ];
+    for bytes in candidates {
+        let (mut a, _) = ready();
+        let poll = a.next(NOW + 2).unwrap().unwrap();
+        assert_eq!(
+            a.on_announcement(poll.id(), &bytes, NOW + 2),
+            Err(Error::Response)
+        );
+    }
+    let (mut a, mut signer) = ready();
+    let poll = a.next(NOW + 2).unwrap().unwrap();
+    let value = feed(&mut signer, 10, 1);
+    assert_eq!(
+        a.on_feed(poll.id(), &bytes(&value), &authority(&signer), NOW + 2),
+        Err(Error::Response)
+    );
+    let (mut a, _) = ready();
+    let poll = a.next(NOW + 2).unwrap().unwrap();
+    a.on_announcement(
+        poll.id(),
+        br#"{"revision":10,"policy_epoch":1,"changed":false}"#,
+        NOW + 2,
+    )
+    .unwrap();
+    a.on_policy_epoch(1, NOW + 2).unwrap();
+    assert!(a.current(NOW + 2).is_ok());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn direct_refresh_fences_polls_and_preserves_backoff() {
+    let mut signer = signer();
+    let value = feed(&mut signer, 10, 1);
+    let mut charter = cnvy::cchr::Charter::new(ORIGIN, "alpha").unwrap();
+    let mut follower = cnvy::feed::Follower::new(config()).unwrap();
+    let r = follower.start(NOW).unwrap();
+    follower
+        .feed(
+            r.id(),
+            &bytes(&value),
+            &authority(&signer),
+            &mut charter,
+            NOW,
+        )
+        .unwrap();
+    let poll = follower.next(10, NOW + 2).unwrap().unwrap();
+    follower.refresh(NOW + 2).unwrap();
+    assert_eq!(
+        follower.announcement(poll.id(), b"{}", NOW + 2),
+        Err(Error::Obsolete)
+    );
+    let fetch = follower.next(10, NOW + 2).unwrap().unwrap();
+    follower.failed(fetch.id(), NOW + 2, 0).unwrap();
+    follower.refresh(NOW + 2).unwrap();
+    assert_eq!(follower.next(10, NOW + 2), Ok(None));
+    // The old publication remains valid, but cannot satisfy a newer revision hint.
+    follower.on_change(11, 10, NOW + 2).unwrap();
+    let fetch = follower.next(10, NOW + 4).unwrap().unwrap();
+    assert_eq!(
+        follower.feed(
+            fetch.id(),
+            &bytes(&value),
+            &authority(&signer),
+            &mut charter,
+            NOW + 4
+        ),
+        Err(Error::BehindAnnouncement)
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn newer_revision_fences_an_in_flight_poll() {
+    let (mut assurance, _) = ready();
+    let poll = assurance.next(NOW + 2).unwrap().unwrap();
+    assurance.on_change(11, NOW + 2).unwrap();
+    assert_eq!(
+        assurance.on_announcement(poll.id(), b"{}", NOW + 2),
+        Err(Error::Obsolete)
+    );
+    assert_eq!(
+        assurance.next(NOW + 2).unwrap().unwrap().action(),
+        Action::Fetch
+    );
+}

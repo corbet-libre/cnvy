@@ -52,13 +52,13 @@ impl Http {
     /// Explicit operator roots supplement the public root store; TLS verification stays on.
     pub fn with_roots(origin: &str, community: &str, roots: &[Vec<u8>]) -> Result<Self> {
         // Share Charter's strict HTTPS-origin validation.
-        cchr::Charter::new(origin, community).map_err(Error::Trust)?;
-        let origin = url::Url::parse(origin)
-            .map_err(|_| Error::Configuration)?
+        let origin = cchr::Charter::new(origin, community)
+            .map_err(Error::Trust)?
             .origin()
-            .ascii_serialization();
+            .to_owned();
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .https_only(true)
             .referer(false)
             .no_proxy()

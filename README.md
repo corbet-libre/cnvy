@@ -13,8 +13,8 @@ runtime or development dependency. Its test driver only wires real leaf APIs.
 
 ## Reuse and candidates
 
-Use reqwest/rustls for native TLS, url for origin parsing and serde for bounded
-announcements. Reuse cchr/csgn/cshm unchanged for authenticated publications.
+Use reqwest/rustls for native TLS and serde for bounded announcements. Reuse
+Charter's validated canonical origin and cchr/csgn/cshm for authenticated publications.
 Generic retry middleware cannot fence response generations or enforce signed
 Charter freshness; the extracted explicit state machine owns those transitions.
 No new cryptographic, network or storage primitives are introduced.

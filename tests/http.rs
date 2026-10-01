@@ -87,6 +87,12 @@ async fn real_https_fetch_bootstraps_without_member_headers_or_redirects() {
     let mut assurance = Assurance::new(&origin, "alpha", config()).unwrap();
     let request = assurance.start(NOW).unwrap();
     let received = http.execute(request, NOW).await.unwrap();
+    assert!(matches!(received.authority(NOW, 0), Err(Error::Response)));
+    assert!(matches!(received.authority(NOW, 301), Err(Error::Response)));
+    assert!(matches!(
+        received.authority(u64::MAX, 1),
+        Err(Error::Exhausted)
+    ));
     let authority = received.authority(NOW, 60).unwrap();
     assurance
         .on_feed(request.id(), received.bytes(), &authority, NOW)
@@ -148,4 +154,97 @@ async fn chunked_announcements_enforce_the_bound_without_a_length_header() {
         Err(Error::Response)
     ));
     assert!(server.await.unwrap().starts_with("POST /v1/trust_changes "));
+}
+
+#[tokio::test]
+async fn malformed_authority_and_late_requests_are_refused() {
+    for content in [b"{}".to_vec(), br#"{"revision":1,"key_ring":[]}"#.to_vec()] {
+        let mut reply = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            content.len()
+        )
+        .into_bytes();
+        reply.extend_from_slice(&content);
+        let (origin, root, server) = server(reply).await;
+        let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+        let mut follower = cnvy::feed::Follower::new(config()).unwrap();
+        let request = follower.start(NOW).unwrap();
+        assert!(matches!(
+            http.execute(request, request.deadline()).await,
+            Err(Error::Timeout)
+        ));
+        let response = http.execute(request, NOW).await.unwrap();
+        assert!(response.authority(NOW, 60).is_err());
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn announcement_response_cannot_bootstrap_authority() {
+    let content = br#"{"revision":10,"policy_epoch":1,"changed":false}"#;
+    let mut reply = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        content.len()
+    )
+    .into_bytes();
+    reply.extend_from_slice(content);
+    let (origin, root, server) = server(reply).await;
+    let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+    let mut signer = signer();
+    let wire = bytes(&feed(&mut signer, 10, 1));
+    let trusted = cnvy::cchr::AuthenticatedOrigin::from_authenticated_response(
+        &origin,
+        "alpha",
+        &signer.key_ring().to_cbor(),
+        1,
+        NOW,
+        NOW + 60,
+    )
+    .unwrap();
+    let mut a = Assurance::new(&origin, "alpha", config()).unwrap();
+    let initial = a.start(NOW).unwrap();
+    a.on_feed(initial.id(), &wire, &trusted, NOW).unwrap();
+    let poll = a.next(NOW + 2).unwrap().unwrap();
+    let received = http.execute(poll, NOW + 2).await.unwrap();
+    assert!(matches!(
+        received.authority(NOW + 2, 60),
+        Err(Error::Response)
+    ));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn real_connection_and_truncated_body_failures_are_refused() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!(
+        "https://localhost:{}",
+        listener.local_addr().unwrap().port()
+    );
+    drop(listener);
+    let http = Http::new(&origin, "alpha").unwrap();
+    let mut follower = cnvy::feed::Follower::new(config()).unwrap();
+    let request = follower.start(NOW).unwrap();
+    assert!(matches!(
+        http.execute(request, NOW).await,
+        Err(Error::Network)
+    ));
+
+    let (origin, root, server) = server(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial".to_vec(),
+    )
+    .await;
+    let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+    assert!(matches!(
+        http.execute(request, NOW).await,
+        Err(Error::Network)
+    ));
+    server.await.unwrap();
+}
+
+#[test]
+fn malformed_operator_certificate_is_rejected_by_the_real_tls_builder() {
+    assert!(matches!(
+        Http::with_roots("https://localhost", "alpha", &[vec![]]),
+        Err(Error::Network)
+    ));
 }
