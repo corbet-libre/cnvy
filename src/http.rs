@@ -3,56 +3,30 @@ use crate::{
     Error, Result,
     feed::{Action, Request},
 };
-use cchr::AuthenticatedOrigin;
-use serde::Deserialize;
 use std::time::Duration;
 
 pub struct Http {
     client: reqwest::Client,
     origin: String,
-    community: String,
 }
 /// Produced only by the configured HTTPS transport, without following redirects.
 pub struct Received {
     bytes: Vec<u8>,
-    action: Action,
-    origin: String,
-    community: String,
 }
 impl Received {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
-    /// Stamp with the caller's trusted receive time. Only fetch responses bootstrap.
-    pub fn authority(&self, now: u64, fresh_for: u64) -> Result<AuthenticatedOrigin> {
-        if self.action != Action::Fetch || fresh_for == 0 || fresh_for > 300 {
-            return Err(Error::Response);
-        }
-        #[derive(Deserialize)]
-        struct Header {
-            revision: u64,
-            key_ring: Vec<u8>,
-        }
-        let header: Header = serde_json::from_slice(&self.bytes).map_err(|_| Error::Response)?;
-        AuthenticatedOrigin::from_authenticated_response(
-            &self.origin,
-            &self.community,
-            &header.key_ring,
-            header.revision,
-            now,
-            now.checked_add(fresh_for).ok_or(Error::Exhausted)?,
-        )
-        .map_err(Error::Trust)
-    }
 }
+
 impl Http {
-    pub fn new(origin: &str, community: &str) -> Result<Self> {
-        Self::with_roots(origin, community, &[])
+    pub fn new(configuration: &cchr::Configuration) -> Result<Self> {
+        Self::with_roots(configuration, &[])
     }
     /// Explicit operator roots supplement the public root store; TLS verification stays on.
-    pub fn with_roots(origin: &str, community: &str, roots: &[Vec<u8>]) -> Result<Self> {
+    pub fn with_roots(configuration: &cchr::Configuration, roots: &[Vec<u8>]) -> Result<Self> {
         // Share Charter's strict HTTPS-origin validation.
-        let origin = cchr::Charter::new(origin, community)
+        let origin = cchr::Charter::new(configuration.clone())
             .map_err(Error::Trust)?
             .origin()
             .to_owned();
@@ -70,11 +44,7 @@ impl Http {
             );
         }
         let client = builder.build().map_err(|_| Error::Network)?;
-        Ok(Self {
-            client,
-            origin,
-            community: community.into(),
-        })
+        Ok(Self { client, origin })
     }
     /// Cancellation is dropping this future. The caller also fences it in Follower.
     /// No bearer, cookies, member fields, arbitrary URLs or automatic retries.
@@ -124,11 +94,6 @@ impl Http {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok(Received {
-            bytes,
-            action: request.action(),
-            origin: self.origin.clone(),
-            community: self.community.clone(),
-        })
+        Ok(Received { bytes })
     }
 }

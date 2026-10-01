@@ -1,6 +1,6 @@
 //! Extractable Envoy trust-feed state machine. No background I/O or member data.
 use crate::{Error, Result};
-use cchr::{AuthenticatedOrigin, Charter};
+use cchr::Charter;
 use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug)]
@@ -268,20 +268,13 @@ impl Follower {
         }
         Ok(())
     }
-    pub fn feed(
-        &mut self,
-        id: u64,
-        bytes: &[u8],
-        authority: &AuthenticatedOrigin,
-        charter: &mut Charter,
-        now: u64,
-    ) -> Result<()> {
+    pub fn feed(&mut self, id: u64, bytes: &[u8], charter: &mut Charter, now: u64) -> Result<()> {
         let request = self.take(id, now)?;
         if request.action != Action::Fetch {
             self.backoff(now, self.retry_entropy)?;
             return Err(Error::Response);
         }
-        match charter.install(bytes, authority, now) {
+        match charter.install(bytes, now) {
             Ok(v)
                 if v.revision() >= self.target_revision
                     && v.policy_epoch() >= self.target_epoch =>

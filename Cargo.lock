@@ -188,7 +188,7 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://github.com/corbet-foss/cchr?branch=main#c0b5ebf4f48fb8c42d386cb9fa8f5d997498b871"
+source = "git+https://github.com/corbet-foss/cchr?branch=main#9d02020641fdb0f8763df88ae87c5cc2c2791fc1"
 dependencies = [
  "cgrd",
  "csgn",
@@ -322,7 +322,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/crbk?branch=main#ee4f73334818e2053c7df3d123a8e3b8cc23b2cf"
+source = "git+https://github.com/corbet-foss/crbk?branch=main#50de4fe2713977e85c4fb135f6f1766441aa96cb"
 dependencies = [
  "serde",
  "serde_json",
@@ -347,7 +347,7 @@ dependencies = [
 [[package]]
 name = "csgn"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/csgn?branch=main#eac891b771152b17aa3a903edfe9c129e43a371e"
+source = "git+https://github.com/corbet-foss/csgn?branch=main#96f946b89efd67d79f841259ee914a4f6f43dcd0"
 dependencies = [
  "ciborium-ll",
  "coset",

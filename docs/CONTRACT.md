@@ -6,7 +6,7 @@ Envoy owns the extracted feed state machine and HTTPS adapter. `csrn` wires
 ## API and ports
 
 `Follower::new(Config)`, `start(now)`, `next(current_revision, now)`,
-`feed(id, bytes, authenticated_origin, &mut Charter, now)`, `announcement(id, bytes, now)`,
+`feed(id, bytes, &mut Charter, now)`, `announcement(id, bytes, now)`,
 `on_change(revision, current_revision, now)`, `on_policy_epoch(epoch, current_epoch, now)`, `refresh(now)`, `failed(id, now, jitter)`, `permits_current(revision, epoch, now)`, `stop()`.
 Config contains explicit refresh, minimum poll, request, backoff and maximum
 staleness durations, plus per-instance `retry_entropy` supplied by the runtime. All times are injected Unix seconds. No timer, background
@@ -32,12 +32,14 @@ supplement the public store; certificate and hostname checks stay enabled.
 Origin validation and canonicalization use Charter's existing constructor and
 configured-origin accessor; invalid input retains the same Charter error.
 
-A `Received` has no public constructor. Its `authority(receive_time, fresh_for)`
-converts only a successful HTTPS feed response into cchr's privileged origin
-assertion, with the response's ring/current revision and a 1–300-second receipt
-window. Charter still verifies every signed field and floor. An adapter supplied
-by a browser has the same obligation: authenticate the configured origin, bypass
-body caches, reject redirects and never assert authority from untrusted bytes.
+`Http::new(&Configuration)` and `with_roots(&Configuration, roots)` use
+Charter's validation of deployment configuration. `Received::bytes()` exposes
+bounded transport bytes only. HTTPS never turns a response key ring into
+publishing authority. The configured initial ring and minimum revisions live in
+Charter; every later ring requires an original csgn transition signed by the
+installed predecessor. Envoy passes bytes unchanged to `Charter::install`.
+Browser adapters must authenticate the configured origin, reject redirects and
+bypass body caches, while leaving all publishing authority checks to Charter.
 No TLS deployment or browser networking runtime is shipped.
 
 ## States and failure semantics
@@ -97,7 +99,8 @@ Charter exposes a borrowed Guard policy containing the original signed full
 settings and separate revocations. Guard verifies these envelopes, the device
 signature and the profile, then delegates rich policy to Rulebook. These captures
 verify byte preservation; they do not assert admission without a valid bundle.
-The full cvld→guard→forum path still requires the door owner's current device
-registration authority and matching signed credential evidence. Production TLS bootstrap provisioning, browser transport and embedding
+Charter and Assurance separately execute actual door-authorized device bundles
+through Guard on native and wasm. Production forum wiring remains downstream.
+Production publishing-root provisioning and TLS setup, browser transport and embedding
 cancellation/scheduling are adapter integration responsibilities. No deployment,
 registry publication, payments or external test accounts are involved.

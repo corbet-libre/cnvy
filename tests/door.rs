@@ -1,7 +1,7 @@
 mod support;
 use cnvy::{
     Error,
-    cchr::{AuthenticatedOrigin, Error as TrustError, Kind},
+    cchr::{Configuration, Error as TrustError, Kind},
     feed::{Action, Config},
 };
 use serde_json::Value;
@@ -32,18 +32,16 @@ const UPDATES: [(&[u8], &[u8]); 5] = [
         include_bytes!("fixtures/revoked.json"),
     ),
 ];
-fn authority() -> AuthenticatedOrigin {
-    let first: Value = serde_json::from_slice(INITIAL).unwrap();
-    let ring: Vec<u8> = serde_json::from_value(first["key_ring"].clone()).unwrap();
-    AuthenticatedOrigin::from_authenticated_response(
-        ORIGIN,
-        "alpha",
-        &ring,
-        first["revision"].as_u64().unwrap(),
-        NOW,
-        NOW + 300,
-    )
-    .unwrap()
+fn configuration() -> Configuration {
+    let config: Value =
+        serde_json::from_slice(include_bytes!("fixtures/publishing-root.json")).unwrap();
+    Configuration {
+        origin: ORIGIN.into(),
+        community: "alpha".into(),
+        key_ring: serde_json::from_value(config["key_ring"].clone()).unwrap(),
+        minimum_revision: config["minimum_revision"].as_u64().unwrap(),
+        ring_revision: 0,
+    }
 }
 fn config() -> Config {
     Config {
@@ -60,10 +58,9 @@ fn config() -> Config {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn real_door_policy_schema_and_revocation_announcements_drive_the_follower() {
     assert_eq!(INITIAL, ORDINARY);
-    let authority = authority();
-    let mut a = Assurance::new(ORIGIN, "alpha", config()).unwrap();
+    let mut a = Assurance::configured(configuration(), config()).unwrap();
     let request = a.start(NOW).unwrap();
-    a.on_feed(request.id(), INITIAL, &authority, NOW).unwrap();
+    a.on_feed(request.id(), INITIAL, NOW).unwrap();
     let mut now = NOW;
     for (announcement, bytes) in UPDATES {
         now += 2;
@@ -73,7 +70,7 @@ fn real_door_policy_schema_and_revocation_announcements_drive_the_follower() {
         assert_eq!(a.current(now).unwrap_err(), Error::Unavailable);
         let fetch = a.next(now).unwrap().unwrap();
         assert_eq!(fetch.action(), Action::Fetch);
-        a.on_feed(fetch.id(), bytes, &authority, now).unwrap();
+        a.on_feed(fetch.id(), bytes, now).unwrap();
         let raw: Value = serde_json::from_slice(bytes).unwrap();
         let current = a.current(now).unwrap();
         assert_eq!(current.revision(), raw["revision"].as_u64().unwrap());
@@ -98,7 +95,7 @@ fn real_door_policy_schema_and_revocation_announcements_drive_the_follower() {
     a.refresh(now).unwrap();
     let fetch = a.next(now).unwrap().unwrap();
     assert_eq!(
-        a.on_feed(fetch.id(), INITIAL, &authority, now),
+        a.on_feed(fetch.id(), INITIAL, now),
         Err(Error::Trust(TrustError::Rollback))
     );
     assert!(a.current(now).is_ok());

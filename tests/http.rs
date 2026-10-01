@@ -84,19 +84,12 @@ async fn real_https_fetch_bootstraps_without_member_headers_or_redirects() {
     .into_bytes();
     reply.extend_from_slice(&content);
     let (origin, root, server) = server(reply).await;
-    let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+    let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
     let mut assurance = Assurance::new(&origin, "alpha", config()).unwrap();
     let request = assurance.start(NOW).unwrap();
     let received = http.execute(request, NOW).await.unwrap();
-    assert!(matches!(received.authority(NOW, 0), Err(Error::Response)));
-    assert!(matches!(received.authority(NOW, 301), Err(Error::Response)));
-    assert!(matches!(
-        received.authority(u64::MAX, 1),
-        Err(Error::Exhausted)
-    ));
-    let authority = received.authority(NOW, 60).unwrap();
     assurance
-        .on_feed(request.id(), received.bytes(), &authority, NOW)
+        .on_feed(request.id(), received.bytes(), NOW)
         .unwrap();
     assert_eq!(assurance.current(NOW).unwrap().revision(), 10);
     let trace = server.await.unwrap().to_lowercase();
@@ -114,13 +107,13 @@ async fn redirect_and_oversize_responses_are_refused() {
     for reply in [b"HTTP/1.1 307 Temporary Redirect\r\nLocation: https://127.0.0.1:9/\r\nContent-Length: 0\r\n\r\n".to_vec(),
         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 999999999\r\n\r\n".to_vec()] {
         let (origin,root,server)=server(reply).await;
-        let http=Http::with_roots(&origin,"alpha",&[root]).unwrap();
+        let http=Http::with_roots(&configuration(&origin,"alpha"),&[root]).unwrap();
         let mut a=Assurance::new(&origin,"alpha",config()).unwrap();let request=a.start(NOW).unwrap();
         assert!(matches!(http.execute(request,NOW).await,Err(Error::Response)));
         server.await.unwrap();
     }
-    assert!(Http::new("http://localhost", "alpha").is_err());
-    assert!(Http::new("https://user@localhost", "alpha").is_err());
+    assert!(Http::new(&configuration("http://localhost", "alpha")).is_err());
+    assert!(Http::new(&configuration("https://user@localhost", "alpha")).is_err());
 }
 
 #[tokio::test]
@@ -134,21 +127,12 @@ async fn chunked_announcements_enforce_the_bound_without_a_length_header() {
     reply.extend_from_slice(&body);
     reply.extend_from_slice(b"\r\n0\r\n\r\n");
     let (origin, root, server) = server(reply).await;
-    let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+    let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
     let mut a = Assurance::new(&origin, "alpha", config()).unwrap();
     let initial = a.start(NOW).unwrap();
     let mut s = signer();
     let wire = bytes(&feed(&mut s, 10, 1));
-    let trusted = cnvy::cchr::AuthenticatedOrigin::from_authenticated_response(
-        &origin,
-        "alpha",
-        &s.key_ring().to_cbor(),
-        1,
-        NOW,
-        NOW + 60,
-    )
-    .unwrap();
-    a.on_feed(initial.id(), &wire, &trusted, NOW).unwrap();
+    a.on_feed(initial.id(), &wire, NOW).unwrap();
     let poll = a.next(NOW + 2).unwrap().unwrap();
     assert!(matches!(
         http.execute(poll, NOW + 2).await,
@@ -158,7 +142,7 @@ async fn chunked_announcements_enforce_the_bound_without_a_length_header() {
 }
 
 #[tokio::test]
-async fn malformed_authority_and_late_requests_are_refused() {
+async fn malformed_feeds_and_late_requests_are_refused() {
     for content in [b"{}".to_vec(), br#"{"revision":1,"key_ring":[]}"#.to_vec()] {
         let mut reply = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -167,7 +151,7 @@ async fn malformed_authority_and_late_requests_are_refused() {
         .into_bytes();
         reply.extend_from_slice(&content);
         let (origin, root, server) = server(reply).await;
-        let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+        let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
         let mut follower = cnvy::feed::Follower::new(config()).unwrap();
         let request = follower.start(NOW).unwrap();
         assert!(matches!(
@@ -175,13 +159,14 @@ async fn malformed_authority_and_late_requests_are_refused() {
             Err(Error::Timeout)
         ));
         let response = http.execute(request, NOW).await.unwrap();
-        assert!(response.authority(NOW, 60).is_err());
+        let mut charter = cnvy::cchr::Charter::new(configuration(&origin, "alpha")).unwrap();
+        assert!(charter.install(response.bytes(), NOW).is_err());
         server.await.unwrap();
     }
 }
 
 #[tokio::test]
-async fn announcement_response_cannot_bootstrap_authority() {
+async fn announcement_response_is_only_a_hint() {
     let content = br#"{"revision":10,"policy_epoch":1,"changed":false}"#;
     let mut reply = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -190,27 +175,17 @@ async fn announcement_response_cannot_bootstrap_authority() {
     .into_bytes();
     reply.extend_from_slice(content);
     let (origin, root, server) = server(reply).await;
-    let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+    let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
     let mut signer = signer();
     let wire = bytes(&feed(&mut signer, 10, 1));
-    let trusted = cnvy::cchr::AuthenticatedOrigin::from_authenticated_response(
-        &origin,
-        "alpha",
-        &signer.key_ring().to_cbor(),
-        1,
-        NOW,
-        NOW + 60,
-    )
-    .unwrap();
     let mut a = Assurance::new(&origin, "alpha", config()).unwrap();
     let initial = a.start(NOW).unwrap();
-    a.on_feed(initial.id(), &wire, &trusted, NOW).unwrap();
+    a.on_feed(initial.id(), &wire, NOW).unwrap();
     let poll = a.next(NOW + 2).unwrap().unwrap();
     let received = http.execute(poll, NOW + 2).await.unwrap();
-    assert!(matches!(
-        received.authority(NOW + 2, 60),
-        Err(Error::Response)
-    ));
+    a.on_announcement(poll.id(), received.bytes(), NOW + 2)
+        .unwrap();
+    assert_eq!(a.current(NOW + 2).unwrap().revision(), 10);
     server.await.unwrap();
 }
 
@@ -222,7 +197,7 @@ async fn real_connection_and_truncated_body_failures_are_refused() {
         listener.local_addr().unwrap().port()
     );
     drop(listener);
-    let http = Http::new(&origin, "alpha").unwrap();
+    let http = Http::new(&configuration(&origin, "alpha")).unwrap();
     let mut follower = cnvy::feed::Follower::new(config()).unwrap();
     let request = follower.start(NOW).unwrap();
     assert!(matches!(
@@ -234,7 +209,7 @@ async fn real_connection_and_truncated_body_failures_are_refused() {
         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial".to_vec(),
     )
     .await;
-    let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+    let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
     assert!(matches!(
         http.execute(request, NOW).await,
         Err(Error::Network)
@@ -245,7 +220,7 @@ async fn real_connection_and_truncated_body_failures_are_refused() {
 #[test]
 fn malformed_operator_certificate_is_rejected_by_the_real_tls_builder() {
     assert!(matches!(
-        Http::with_roots("https://localhost", "alpha", &[vec![]]),
+        Http::with_roots(&configuration("https://localhost", "alpha"), &[vec![]]),
         Err(Error::Network)
     ));
 }
@@ -266,7 +241,7 @@ async fn real_tls_requires_json_media_type_even_for_a_success_response() {
         )
         .into_bytes();
         let (origin, root, server) = server(reply).await;
-        let http = Http::with_roots(&origin, "alpha", &[root]).unwrap();
+        let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
         let request = cnvy::feed::Follower::new(config())
             .unwrap()
             .start(NOW)
@@ -279,4 +254,32 @@ async fn real_tls_requires_json_media_type_even_for_a_success_response() {
         }
         server.await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn valid_tls_does_not_authorize_a_forged_publishing_ring() {
+    let mut attacker = csgn::Signer::new(
+        "alpha",
+        csgn::SecretKey::from_seed(&mut [99; 32]),
+        NOW - 1,
+        1000,
+    )
+    .unwrap();
+    let content = bytes(&feed(&mut attacker, 10, 1));
+    let mut reply = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        content.len()
+    ).into_bytes();
+    reply.extend_from_slice(&content);
+    let (origin, root, server) = server(reply).await;
+    let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
+    let mut assurance = Assurance::new(&origin, "alpha", config()).unwrap();
+    let request = assurance.start(NOW).unwrap();
+    let received = http.execute(request, NOW).await.unwrap();
+    assert_eq!(
+        assurance.on_feed(request.id(), received.bytes(), NOW),
+        Err(Error::Trust(cnvy::cchr::Error::Unauthenticated))
+    );
+    assert!(assurance.current(NOW).is_err());
+    server.await.unwrap();
 }

@@ -19,11 +19,9 @@ fn config() -> Config {
 fn ready() -> (Assurance, csgn::Signer) {
     let mut signer = signer();
     let feed = feed(&mut signer, 10, 1);
-    let authority = authority(&signer);
     let mut a = Assurance::new(ORIGIN, "alpha", config()).unwrap();
     let request = a.start(NOW).unwrap();
-    a.on_feed(request.id(), &bytes(&feed), &authority, NOW)
-        .unwrap();
+    a.on_feed(request.id(), &bytes(&feed), NOW).unwrap();
     (a, signer)
 }
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -47,8 +45,7 @@ fn startup_announcements_and_atomic_install() {
     assert_eq!(request.action(), Action::Fetch);
     assert_eq!(request.body(), serde_json::json!({}));
     let current = feed(&mut s, 11, 2);
-    a.on_feed(request.id(), &bytes(&current), &authority(&s), NOW + 2)
-        .unwrap();
+    a.on_feed(request.id(), &bytes(&current), NOW + 2).unwrap();
     assert_eq!(a.current(NOW + 2).unwrap().revision(), 11);
     assert_eq!(
         a.on_announcement(poll.id(), br#"{}"#, NOW + 2),
@@ -88,7 +85,7 @@ fn cancellations_duplicates_clock_regression_and_restart_are_fenced() {
     assert!(a.current(NOW + 2).is_err());
     let v = feed(&mut s, 9, 1);
     assert_eq!(
-        a.on_feed(fresh.id(), &bytes(&v), &authority(&s), NOW + 2),
+        a.on_feed(fresh.id(), &bytes(&v), NOW + 2),
         Err(Error::Trust(cnvy::cchr::Error::Rollback))
     );
     let next = a.next(NOW + 5).unwrap().unwrap();
@@ -119,7 +116,7 @@ fn timeout_and_retry_storms_have_one_bounded_operation() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn malformed_announcements_and_corrupt_feed_cannot_become_trust() {
-    let (mut a, s) = ready();
+    let (mut a, _) = ready();
     let poll = a.next(NOW + 2).unwrap().unwrap();
     assert_eq!(
         a.on_announcement(
@@ -131,10 +128,7 @@ fn malformed_announcements_and_corrupt_feed_cannot_become_trust() {
     );
     assert_eq!(a.current(NOW + 2).unwrap().revision(), 10);
     let fetch = a.next(NOW + 4).unwrap().unwrap();
-    assert!(
-        a.on_feed(fetch.id(), b"{}", &authority(&s), NOW + 4)
-            .is_err()
-    );
+    assert!(a.on_feed(fetch.id(), b"{}", NOW + 4).is_err());
     assert_eq!(a.current(NOW + 4).unwrap().revision(), 10);
     a.on_change(11, NOW + 4).unwrap();
     assert!(a.current(NOW + 4).is_err());
@@ -154,14 +148,13 @@ fn arbitrary_epoch_hint_is_bounded_by_the_next_verified_epoch() {
     let refresh = a.next(NOW + 2).unwrap().unwrap();
     let old = feed(&mut s, 11, 1);
     assert_eq!(
-        a.on_feed(refresh.id(), &bytes(&old), &authority(&s), NOW + 2),
+        a.on_feed(refresh.id(), &bytes(&old), NOW + 2),
         Err(Error::BehindAnnouncement)
     );
     assert!(a.current(NOW + 2).is_err());
     let fresh = a.next(NOW + 4).unwrap().unwrap();
     let new = feed(&mut s, 12, 2);
-    a.on_feed(fresh.id(), &bytes(&new), &authority(&s), NOW + 4)
-        .unwrap();
+    a.on_feed(fresh.id(), &bytes(&new), NOW + 4).unwrap();
     assert_eq!(a.current(NOW + 4).unwrap().policy_epoch(), 2);
 }
 
@@ -234,7 +227,7 @@ fn response_types_and_every_announcement_field_are_checked() {
     let poll = a.next(NOW + 2).unwrap().unwrap();
     let value = feed(&mut signer, 10, 1);
     assert_eq!(
-        a.on_feed(poll.id(), &bytes(&value), &authority(&signer), NOW + 2),
+        a.on_feed(poll.id(), &bytes(&value), NOW + 2),
         Err(Error::Response)
     );
     let (mut a, _) = ready();
@@ -254,17 +247,11 @@ fn response_types_and_every_announcement_field_are_checked() {
 fn direct_refresh_fences_polls_and_preserves_backoff() {
     let mut signer = signer();
     let value = feed(&mut signer, 10, 1);
-    let mut charter = cnvy::cchr::Charter::new(ORIGIN, "alpha").unwrap();
+    let mut charter = cnvy::cchr::Charter::new(configuration(ORIGIN, "alpha")).unwrap();
     let mut follower = cnvy::feed::Follower::new(config()).unwrap();
     let r = follower.start(NOW).unwrap();
     follower
-        .feed(
-            r.id(),
-            &bytes(&value),
-            &authority(&signer),
-            &mut charter,
-            NOW,
-        )
+        .feed(r.id(), &bytes(&value), &mut charter, NOW)
         .unwrap();
     let poll = follower.next(10, NOW + 2).unwrap().unwrap();
     follower.refresh(NOW + 2).unwrap();
@@ -280,13 +267,7 @@ fn direct_refresh_fences_polls_and_preserves_backoff() {
     follower.on_change(11, 10, NOW + 2).unwrap();
     let fetch = follower.next(10, NOW + 4).unwrap().unwrap();
     assert_eq!(
-        follower.feed(
-            fetch.id(),
-            &bytes(&value),
-            &authority(&signer),
-            &mut charter,
-            NOW + 4
-        ),
+        follower.feed(fetch.id(), &bytes(&value), &mut charter, NOW + 4),
         Err(Error::BehindAnnouncement)
     );
 }
@@ -323,16 +304,10 @@ fn automatic_failures_use_injected_entropy_for_bounded_retry() {
                 Err(Error::Timeout)
             ),
             2 => {
-                let mut charter = cnvy::cchr::Charter::new(ORIGIN, "alpha").unwrap();
+                let mut charter = cnvy::cchr::Charter::new(configuration(ORIGIN, "alpha")).unwrap();
                 assert!(
                     follower
-                        .feed(
-                            request.id(),
-                            b"{}",
-                            &authority(&signer()),
-                            &mut charter,
-                            failed_at
-                        )
+                        .feed(request.id(), b"{}", &mut charter, failed_at)
                         .is_err()
                 );
             }

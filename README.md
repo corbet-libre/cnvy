@@ -31,3 +31,7 @@ substantive CI on the exact current head and respects branch protections.
 There are no npm manifests or production-code coverage exclusions.
 
 LGPL-3.0-only WITH LGPL-3.0-linking-exception. No registry publication.
+
+Publishing authority is supplied through per-community deployment configuration.
+HTTPS returns bytes only; Charter verifies the configured root, original signed
+ring continuity and revision floors. No feed response can authorize its own ring.

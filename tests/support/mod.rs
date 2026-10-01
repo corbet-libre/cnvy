@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use cnvy::cchr::AuthenticatedOrigin;
+use cnvy::cchr::Configuration;
 use csgn::{Kind as CoseKind, SecretKey, Signer};
 use serde_json::{Value, json};
 
@@ -50,16 +50,14 @@ pub fn feed(s: &mut Signer, revision: u64, epoch: u64) -> Value {
     }
     v
 }
-pub fn authority(s: &Signer) -> AuthenticatedOrigin {
-    AuthenticatedOrigin::from_authenticated_response(
-        ORIGIN,
-        "alpha",
-        &s.key_ring().to_cbor(),
-        1,
-        NOW,
-        NOW + 100,
-    )
-    .unwrap()
+pub fn configuration(origin: &str, community: &str) -> Configuration {
+    Configuration {
+        origin: origin.into(),
+        community: community.into(),
+        key_ring: signer().key_ring().to_cbor(),
+        minimum_revision: 1,
+        ring_revision: 0,
+    }
 }
 pub fn bytes(v: &Value) -> Vec<u8> {
     serde_json::to_vec(v).unwrap()
@@ -89,7 +87,13 @@ pub struct Driver {
 impl Driver {
     pub fn new(origin: &str, community: &str, config: Config) -> Result<Self> {
         Ok(Self {
-            charter: cchr::Charter::new(origin, community).map_err(Error::Trust)?,
+            charter: cchr::Charter::new(configuration(origin, community)).map_err(Error::Trust)?,
+            follower: Follower::new(config)?,
+        })
+    }
+    pub fn configured(configuration: Configuration, config: Config) -> Result<Self> {
+        Ok(Self {
+            charter: cchr::Charter::new(configuration).map_err(Error::Trust)?,
             follower: Follower::new(config)?,
         })
     }
@@ -124,15 +128,8 @@ impl Driver {
             .unwrap_or(0);
         self.follower.on_policy_epoch(epoch, current, now)
     }
-    pub fn on_feed(
-        &mut self,
-        id: u64,
-        bytes: &[u8],
-        origin: &cchr::AuthenticatedOrigin,
-        now: u64,
-    ) -> Result<()> {
-        self.follower
-            .feed(id, bytes, origin, &mut self.charter, now)
+    pub fn on_feed(&mut self, id: u64, bytes: &[u8], now: u64) -> Result<()> {
+        self.follower.feed(id, bytes, &mut self.charter, now)
     }
     pub fn on_announcement(&mut self, id: u64, bytes: &[u8], now: u64) -> Result<()> {
         self.follower.announcement(id, bytes, now)
