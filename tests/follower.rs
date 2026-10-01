@@ -320,3 +320,91 @@ fn automatic_failures_use_injected_entropy_for_bounded_retry() {
         assert!(follower.next(0, failed_at + 3).unwrap().is_some());
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn obsolete_completion_after_replacement_keeps_new_fetch_alive() {
+    let (mut a, mut s) = ready();
+    let poll = a.next(NOW + 2).unwrap().unwrap();
+    assert_eq!(poll.action(), Action::Poll { revision: 10 });
+    a.on_change(11, NOW + 2).unwrap();
+    let fetch = a.next(NOW + 2).unwrap().unwrap();
+    assert_eq!(fetch.action(), Action::Fetch);
+    assert!(fetch.id() > poll.id());
+    assert_eq!(
+        a.on_announcement(poll.id(), b"{}", NOW + 2),
+        Err(Error::Obsolete)
+    );
+    assert!(a.next(NOW + 2).unwrap().is_none());
+    assert_eq!(a.feed_state(), State::Fetching);
+    assert!(a.current(NOW + 2).is_err());
+    let current = feed(&mut s, 11, 2);
+    a.on_feed(fetch.id(), &bytes(&current), NOW + 2).unwrap();
+    assert_eq!(a.current(NOW + 2).unwrap().revision(), 11);
+    assert_eq!(
+        a.on_feed(poll.id(), &bytes(&current), NOW + 2),
+        Err(Error::Obsolete)
+    );
+    assert_eq!(
+        a.on_feed(fetch.id(), &bytes(&current), NOW + 2),
+        Err(Error::Obsolete)
+    );
+    assert_eq!(a.current(NOW + 2).unwrap().revision(), 11);
+}
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rejected_refresh_behind_epoch_hint_survives_newer_revision_installs() {
+    let (mut a, mut s) = ready();
+    let poll = a.next(NOW + 2).unwrap().unwrap();
+    a.on_policy_epoch(u64::MAX, NOW + 2).unwrap();
+    a.on_change(11, NOW + 2).unwrap();
+    assert_eq!(
+        a.on_announcement(poll.id(), b"{}", NOW + 2),
+        Err(Error::Obsolete)
+    );
+    assert!(a.current(NOW + 2).is_err());
+    let first = a.next(NOW + 2).unwrap().unwrap();
+    let partial_revision = feed(&mut s, 11, 1);
+    assert_eq!(
+        a.on_feed(first.id(), &bytes(&partial_revision), NOW + 2),
+        Err(Error::BehindAnnouncement)
+    );
+    assert!(a.current(NOW + 2).is_err());
+    assert!(a.next(NOW + 2).unwrap().is_none());
+    let second = a.next(NOW + 4).unwrap().unwrap();
+    let advanced_revision = feed(&mut s, 12, 1);
+    assert_eq!(
+        a.on_feed(second.id(), &bytes(&advanced_revision), NOW + 4),
+        Err(Error::BehindAnnouncement)
+    );
+    assert!(a.current(NOW + 4).is_err());
+    let third = a.next(NOW + 8).unwrap().unwrap();
+    let full = feed(&mut s, 13, 2);
+    a.on_feed(third.id(), &bytes(&full), NOW + 8).unwrap();
+    assert_eq!(a.current(NOW + 8).unwrap().revision(), 13);
+    assert_eq!(a.current(NOW + 8).unwrap().policy_epoch(), 2);
+}
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn clock_regression_fences_pending_and_recovers_at_high_water() {
+    let (mut a, mut s) = ready();
+    let poll = a.next(NOW + 2).unwrap().unwrap();
+    a.on_change(11, NOW + 2).unwrap();
+    let fetch = a.next(NOW + 2).unwrap().unwrap();
+    assert_eq!(fetch.action(), Action::Fetch);
+    assert_eq!(a.next(NOW + 1), Err(Error::ClockRegression));
+    assert_eq!(a.feed_state(), State::Unavailable);
+    assert_eq!(a.on_feed(fetch.id(), b"{}", NOW + 2), Err(Error::Obsolete));
+    assert_eq!(
+        a.on_announcement(poll.id(), b"{}", NOW + 2),
+        Err(Error::Obsolete)
+    );
+    let recovery = a.next(NOW + 2).unwrap().unwrap();
+    assert_eq!(recovery.action(), Action::Fetch);
+    assert!(recovery.id() > fetch.id());
+    let current = feed(&mut s, 11, 2);
+    a.on_feed(recovery.id(), &bytes(&current), NOW + 2).unwrap();
+    assert_eq!(a.feed_state(), State::Following);
+    assert_eq!(a.current(NOW + 2).unwrap().revision(), 11);
+    assert!(a.next(NOW + 2).unwrap().is_none());
+}
