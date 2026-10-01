@@ -19,3 +19,9 @@ both targets before setting a future refresh. The redundant alternate fetch
 conditions were removed; stopped callers return before this decision. Real
 startup, failure, poll-cancellation and behind-announcement vectors retain these
 invariants. No production coverage exclusion is used.
+
+The source gate now requires complete LCOV, raw JSON and annotated text from the
+same instrumented execution. Every source file, emitted line, branch and hit/miss
+must agree. A single-file annotated report may omit its filename heading only
+when the other two inventories identify exactly one source file. The exclusion
+manifest is empty; source coverage does not claim every generic instantiation.

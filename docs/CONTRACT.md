@@ -5,19 +5,16 @@ Envoy owns the extracted feed state machine and HTTPS adapter. `csrn` wires
 
 ## API and ports
 
-`Follower::new(Config)`, `start(now)`, `next(now)`,
+`Follower::new(Config)`, `start(now)`, `next(current_revision, now)`,
 `feed(id, bytes, authenticated_origin, &mut Charter, now)`, `announcement(id, bytes, now)`,
-`on_change(revision, now)`, `on_policy_epoch(epoch, now)`, `refresh(now)`, `failed(id, now, jitter)`, `permits_current(revision, epoch, now)`, `stop()`.
+`on_change(revision, current_revision, now)`, `on_policy_epoch(epoch, current_epoch, now)`, `refresh(now)`, `failed(id, now, jitter)`, `permits_current(revision, epoch, now)`, `stop()`.
 Config contains explicit refresh, minimum poll, request, backoff and maximum
-staleness durations. All times are injected Unix seconds. No timer, background
+staleness durations, plus per-instance `retry_entropy` supplied by the runtime. All times are injected Unix seconds. No timer, background
 thread, singleton storage or network task is started. No unused storage port is
 invented for this volatile machine; a server restart starts unbootstrapped.
 
 The injected network port is an owned `Request` output and a matching completion
-input. `on_change` must come from the configured public feed; a member epoch hint
-must come from already verified credential metadata, never an arbitrary member
-request integer. A false high hint can deny availability until restart, but
-cannot grant authority. Request exposes only operation ID, Fetch or Poll(public revision), exact
+input. `on_change` must come from the configured public feed; an epoch hint is bounded to one epoch beyond the caller-supplied current verified epoch. It requests refresh without installing an arbitrary floor or granting authority. Request exposes only operation ID, Fetch or Poll(public revision), exact
 existing cvld path/body and exclusive deadline. The enclosing runtime must cancel
 transport at that deadline or on stop/change; dropping a native execute future
 cancels its I/O. Follower's operation ID also rejects any late completion. It
@@ -30,7 +27,7 @@ referrer, explicit reqwest retry refusal, a generic User-Agent, ten-second conne
 and remaining request deadline as total timeout. Only configured origin plus the
 two fixed paths can be requested. Body collection is checked chunk by chunk, not
 merely against Content-Length: at most cchr's 32 MiB for a feed and 1024 bytes for
-an announcement. All non-success statuses fail. Explicit operator CA roots may
+an announcement. All non-success statuses and missing/non-JSON Content-Type values fail. JSON media-type parameters are accepted. Explicit operator CA roots may
 supplement the public store; certificate and hostname checks stay enabled.
 Origin validation and canonicalization use Charter's existing constructor and
 configured-origin accessor; invalid input retains the same Charter error.
@@ -61,7 +58,7 @@ A periodic fetch runs even when announcements are lost. Empty/unchanged polls
 are spaced by the configured minimum interval, preventing immediate-reply loops.
 
 Exponential retry delay starts at the explicit initial value, doubles to the
-configured cap, and uses caller-supplied entropy for bounded positive jitter.
+configured cap, and uses injected entropy for bounded positive jitter on every failure path, including automatic timeout and rejected feed/announcement. The runtime supplies fresh per-instance entropy in Config; `failed` may replace it with newly sampled entropy. No random generator is implemented here.
 At most one request can exist; caps are enforced for any supplied jitter.
 Successful verified refresh resets backoff. Rejected candidates preserve Charter's
 old valid material; no error extends its signed deadline or the last successful

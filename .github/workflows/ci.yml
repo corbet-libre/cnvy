@@ -56,6 +56,7 @@ jobs:
           name: rustfmt-patch
           path: rustfmt.patch
       - run: test ! -s rustfmt.patch
+      - run: python3 .github/test-check-source-coverage.py
   check:
     needs: resolve
     runs-on: ubuntu-24.04
@@ -127,7 +128,7 @@ jobs:
             coverage.json
             coverage.lcov
             coverage.txt
-      - run: python3 .github/check-coverage.py coverage.json
+      - run: python3 .github/check-source-coverage.py coverage.lcov coverage.json coverage.txt
   dependency-policy:
     needs: resolve
     runs-on: ubuntu-24.04

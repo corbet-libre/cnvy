@@ -12,6 +12,7 @@ fn config() -> Config {
         request_seconds: 26,
         initial_backoff_seconds: 2,
         maximum_backoff_seconds: 16,
+        retry_entropy: 0,
         maximum_staleness_seconds: 60,
     }
 }
@@ -141,10 +142,10 @@ fn malformed_announcements_and_corrupt_feed_cannot_become_trust() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn member_epoch_hint_forces_refresh_without_becoming_authority() {
+fn arbitrary_epoch_hint_is_bounded_by_the_next_verified_epoch() {
     let (mut a, mut s) = ready();
     let poll = a.next(NOW + 2).unwrap().unwrap();
-    a.on_policy_epoch(2, NOW + 2).unwrap();
+    a.on_policy_epoch(u64::MAX, NOW + 2).unwrap();
     assert!(a.current(NOW + 2).is_err());
     assert_eq!(
         a.on_announcement(poll.id(), b"{}", NOW + 2),
@@ -304,4 +305,43 @@ fn newer_revision_fences_an_in_flight_poll() {
         assurance.next(NOW + 2).unwrap().unwrap().action(),
         Action::Fetch
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn automatic_failures_use_injected_entropy_for_bounded_retry() {
+    for case in 0..4 {
+        let mut config = config();
+        config.retry_entropy = 1;
+        let mut follower = cnvy::feed::Follower::new(config).unwrap();
+        let request = follower.start(NOW).unwrap();
+        let failed_at = if case < 2 { request.deadline() } else { NOW };
+        match case {
+            0 => assert_eq!(follower.next(0, failed_at), Ok(None)),
+            1 => assert_eq!(
+                follower.failed(request.id(), failed_at, 1),
+                Err(Error::Timeout)
+            ),
+            2 => {
+                let mut charter = cnvy::cchr::Charter::new(ORIGIN, "alpha").unwrap();
+                assert!(
+                    follower
+                        .feed(
+                            request.id(),
+                            b"{}",
+                            &authority(&signer()),
+                            &mut charter,
+                            failed_at
+                        )
+                        .is_err()
+                );
+            }
+            _ => assert_eq!(
+                follower.announcement(request.id(), b"{}", failed_at),
+                Err(Error::Response)
+            ),
+        }
+        assert_eq!(follower.next(0, failed_at + 2), Ok(None));
+        assert!(follower.next(0, failed_at + 3).unwrap().is_some());
+    }
 }

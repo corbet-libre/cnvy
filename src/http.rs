@@ -99,7 +99,20 @@ impl Http {
             .send()
             .await
             .map_err(|_| Error::Network)?;
+        let json = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value
+                    .split(';')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .eq_ignore_ascii_case("application/json")
+            });
         if !response.status().is_success()
+            || !json
             || response.content_length().is_some_and(|v| v > limit as u64)
         {
             return Err(Error::Response);
