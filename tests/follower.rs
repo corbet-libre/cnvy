@@ -24,6 +24,74 @@ fn ready() -> (Assurance, csgn::Signer) {
     a.on_feed(request.id(), &bytes(&feed), NOW).unwrap();
     (a, signer)
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn balance_follows_the_same_feed_and_a_stripped_kind_cannot_restore_readiness() {
+    let mut signer = signer();
+    let mut original = feed(&mut signer, 10, 1);
+    let fixture: serde_json::Value =
+        serde_json::from_slice(include_bytes!("fixtures/balance-material.json")).unwrap();
+    let mut material = fixture["material"].clone();
+    material["community"] = serde_json::json!("alpha");
+    let signed = sign(&mut signer, csgn::Kind::SettingsSnapshot, material);
+    original["balance"] = serde_json::json!(signed);
+    replace(
+        &mut signer,
+        &mut original,
+        "manifest",
+        csgn::Kind::SettingsSnapshot,
+        |v| v["balance_revision"] = serde_json::json!(1),
+    );
+    let mut client = Assurance::new(ORIGIN, "alpha", config()).unwrap();
+    let request = client.start(NOW).unwrap();
+    assert_eq!(request.path(), "/v1/trust_feed");
+    assert_eq!(request.body(), serde_json::json!({}));
+    client
+        .on_feed(request.id(), &bytes(&original), NOW)
+        .unwrap();
+    assert_eq!(
+        client
+            .current(NOW)
+            .unwrap()
+            .balance()
+            .unwrap()
+            .signed_bytes(),
+        signed
+    );
+
+    client.on_change(11, NOW + 1).unwrap();
+    let request = client.next(NOW + 1).unwrap().unwrap();
+    let stripped = feed(&mut signer, 11, 1);
+    assert!(
+        client
+            .on_feed(request.id(), &bytes(&stripped), NOW + 1)
+            .is_err()
+    );
+    assert!(client.current(NOW + 1).is_err());
+    let request = client.next(NOW + 4).unwrap().unwrap();
+    let mut replacement = feed(&mut signer, 11, 1);
+    replacement["balance"] = serde_json::json!(signed);
+    replace(
+        &mut signer,
+        &mut replacement,
+        "manifest",
+        csgn::Kind::SettingsSnapshot,
+        |v| v["balance_revision"] = serde_json::json!(1),
+    );
+    client
+        .on_feed(request.id(), &bytes(&replacement), NOW + 4)
+        .unwrap();
+    assert_eq!(
+        client
+            .current(NOW + 4)
+            .unwrap()
+            .balance()
+            .unwrap()
+            .signed_bytes(),
+        signed
+    );
+}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn startup_announcements_and_atomic_install() {
