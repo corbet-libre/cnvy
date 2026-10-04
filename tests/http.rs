@@ -283,3 +283,98 @@ async fn valid_tls_does_not_authorize_a_forged_publishing_ring() {
     assert!(assurance.current(NOW).is_err());
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn poll_requests_carry_only_public_revision_without_member_headers() {
+    let announcement = br#"{"revision":10,"policy_epoch":1,"changed":false}"#;
+    let mut reply = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        announcement.len()
+    )
+    .into_bytes();
+    reply.extend_from_slice(announcement);
+    let (origin, root, server) = server(reply).await;
+    let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
+    let mut assurance = Assurance::new(&origin, "alpha", config()).unwrap();
+    let initial = assurance.start(NOW).unwrap();
+    let mut s = signer();
+    let wire = bytes(&feed(&mut s, 10, 1));
+    assurance.on_feed(initial.id(), &wire, NOW).unwrap();
+    let poll = assurance.next(NOW + 2).unwrap().unwrap();
+    assert_eq!(poll.path(), "/v1/trust_changes");
+    assert_eq!(poll.body().to_string(), "{\"revision\":10}");
+    let received = http.execute(poll, NOW + 2).await.unwrap();
+    assurance
+        .on_announcement(poll.id(), received.bytes(), NOW + 2)
+        .unwrap();
+    assert_eq!(assurance.current(NOW + 2).unwrap().revision(), 10);
+    let trace = server.await.unwrap().to_lowercase();
+    assert!(trace.starts_with("post /v1/trust_changes http/1.1"));
+    assert!(trace.contains("user-agent: community-trust-client/1.0"));
+    assert!(trace.contains("cache-control: no-cache, no-store"));
+    assert!(trace.contains("pragma: no-cache"));
+    assert!(!trace.contains("authorization:"));
+    assert!(!trace.contains("cookie:"));
+    assert!(!trace.contains("referer:"));
+    assert!(!trace.contains("member"));
+    assert!(!trace.contains("session"));
+    assert!(!trace.contains("wallet"));
+    assert!(trace.ends_with("{\"revision\":10}"));
+}
+
+#[tokio::test]
+async fn chunked_poll_framing_accepts_boundary_announcement_and_refuses_malformed() {
+    let base = br#"{"revision":10,"policy_epoch":1,"changed":false}"#;
+    let mut body = base.to_vec();
+    body.resize(1024, b' ');
+    let (first, second) = body.split_at(1000);
+    let mut reply =
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+            .to_vec();
+    reply.extend_from_slice(format!("{:x}\r\n", first.len()).as_bytes());
+    reply.extend_from_slice(first);
+    reply.extend_from_slice(b"\r\n");
+    reply.extend_from_slice(format!("{:x}\r\n", second.len()).as_bytes());
+    reply.extend_from_slice(second);
+    reply.extend_from_slice(b"\r\n0\r\n\r\n");
+    let (origin, root, server_task) = server(reply).await;
+    let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
+    let mut assurance = Assurance::new(&origin, "alpha", config()).unwrap();
+    let initial = assurance.start(NOW).unwrap();
+    let mut s = signer();
+    let wire = bytes(&feed(&mut s, 10, 1));
+    assurance.on_feed(initial.id(), &wire, NOW).unwrap();
+    let poll = assurance.next(NOW + 2).unwrap().unwrap();
+    let received = http.execute(poll, NOW + 2).await.unwrap();
+    assert_eq!(received.bytes().len(), 1024);
+    assurance
+        .on_announcement(poll.id(), received.bytes(), NOW + 2)
+        .unwrap();
+    assert_eq!(assurance.current(NOW + 2).unwrap().revision(), 10);
+    assert!(
+        server_task
+            .await
+            .unwrap()
+            .starts_with("POST /v1/trust_changes ")
+    );
+    for reply in [
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\nZZZ\r\nhello\r\n0\r\n\r\n"
+            .to_vec(),
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhe"
+            .to_vec(),
+    ] {
+        let (origin, root, task) = server(reply).await;
+        let http = Http::with_roots(&configuration(&origin, "alpha"), &[root]).unwrap();
+        let mut assurance = Assurance::new(&origin, "alpha", config()).unwrap();
+        let initial = assurance.start(NOW).unwrap();
+        let mut s = signer();
+        let wire = bytes(&feed(&mut s, 10, 1));
+        assurance.on_feed(initial.id(), &wire, NOW).unwrap();
+        let poll = assurance.next(NOW + 2).unwrap().unwrap();
+        assert!(matches!(
+            http.execute(poll, NOW + 2).await,
+            Err(Error::Network)
+        ));
+        task.await.unwrap();
+    }
+}
