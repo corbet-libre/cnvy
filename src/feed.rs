@@ -3,7 +3,8 @@ use crate::{Error, Result};
 use cchr::Charter;
 use serde::Deserialize;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Fresh per-instance entropy from the embedding runtime; not a timestamp.
     pub retry_entropy: u64,

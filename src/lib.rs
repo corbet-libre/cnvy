@@ -1,5 +1,7 @@
 //! Envoy follows public trust feeds and supplies authenticated bytes to Charter.
 #![forbid(unsafe_code)]
+#[cfg(all(feature = "browser", target_arch = "wasm32"))]
+pub mod browser;
 pub mod feed;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub mod http;
