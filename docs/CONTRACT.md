@@ -49,6 +49,15 @@ An AbortController aborts on future drop or the original request deadline.
 Follower still rejects obsolete completions; Charter alone authenticates bytes.
 Worker networking and TLS deployment remain embedding responsibilities.
 
+The isolated literal `wallet` publisher uses `Http::wallet` /
+`wallet_with_roots` and `Browser::wallet`. These explicit constructors require
+`Configuration.community == "wallet"` and retain the same Charter, follower,
+origin validation and transport privacy. They select only the fixed public
+`/v1/wallet_trust_feed` and `/v1/wallet_trust_changes` paths. The request body,
+operation generation and deadline stay unchanged; the caller cannot supply a
+path. Community constructors keep their existing paths. This routing selection
+does not authenticate a wallet member or grant any custody operation.
+
 ## States and failure semantics
 
 Stopped → Fetching → Following. Network, invalid trust, malformed announcement,

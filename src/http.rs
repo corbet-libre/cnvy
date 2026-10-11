@@ -8,6 +8,7 @@ use std::time::Duration;
 pub struct Http {
     client: reqwest::Client,
     origin: String,
+    scope: crate::FeedScope,
 }
 /// Produced only by the configured HTTPS transport, without following redirects.
 pub struct Received {
@@ -25,6 +26,30 @@ impl Http {
     }
     /// Explicit operator roots supplement the public root store; TLS verification stays on.
     pub fn with_roots(configuration: &cchr::Configuration, roots: &[Vec<u8>]) -> Result<Self> {
+        Self::configured(configuration, roots, crate::FeedScope::Community)
+    }
+    /// Use the isolated wallet's fixed feed paths and original Charter/TLS
+    /// checks. The trusted configuration must name the literal wallet issuer.
+    pub fn wallet(configuration: &cchr::Configuration) -> Result<Self> {
+        Self::wallet_with_roots(configuration, &[])
+    }
+    /// Explicit roots supplement normal TLS verification for the same wallet
+    /// origin. Publishing keys still come only from the configured Charter.
+    pub fn wallet_with_roots(
+        configuration: &cchr::Configuration,
+        roots: &[Vec<u8>],
+    ) -> Result<Self> {
+        Self::configured(
+            configuration,
+            roots,
+            crate::FeedScope::wallet(configuration)?,
+        )
+    }
+    fn configured(
+        configuration: &cchr::Configuration,
+        roots: &[Vec<u8>],
+        scope: crate::FeedScope,
+    ) -> Result<Self> {
         // Share Charter's strict HTTPS-origin validation.
         let origin = cchr::Charter::new(configuration.clone())
             .map_err(Error::Trust)?
@@ -44,7 +69,11 @@ impl Http {
             );
         }
         let client = builder.build().map_err(|_| Error::Network)?;
-        Ok(Self { client, origin })
+        Ok(Self {
+            client,
+            origin,
+            scope,
+        })
     }
     /// Cancellation is dropping this future. The caller also fences it in Follower.
     /// No bearer, cookies, member fields, arbitrary URLs or automatic retries.
@@ -60,7 +89,7 @@ impl Http {
         };
         let mut response = self
             .client
-            .post(format!("{}{}", self.origin, request.path()))
+            .post(format!("{}{}", self.origin, self.scope.path(request)))
             .header("Cache-Control", "no-cache, no-store")
             .header("Pragma", "no-cache")
             .header("Accept", "application/json")

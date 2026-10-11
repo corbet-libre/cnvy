@@ -19,6 +19,7 @@ use web_sys::{
 /// Publishing authority stays in the original Charter, never in Fetch.
 pub struct Browser {
     origin: String,
+    scope: crate::FeedScope,
 }
 
 /// Original bounded response bytes, not a parsed or authenticated publication.
@@ -42,11 +43,19 @@ impl Drop for AbortOnDrop {
 impl Browser {
     /// Validate the same exact configured HTTPS origin as the native owner port.
     pub fn new(configuration: &cchr::Configuration) -> Result<Self> {
+        Self::configured(configuration, crate::FeedScope::Community)
+    }
+    /// Select only the isolated wallet's fixed public paths. The same original
+    /// Charter configuration and browser HTTPS/privacy checks remain required.
+    pub fn wallet(configuration: &cchr::Configuration) -> Result<Self> {
+        Self::configured(configuration, crate::FeedScope::wallet(configuration)?)
+    }
+    fn configured(configuration: &cchr::Configuration, scope: crate::FeedScope) -> Result<Self> {
         let origin = cchr::Charter::new(configuration.clone())
             .map_err(Error::Trust)?
             .origin()
             .to_owned();
-        Ok(Self { origin })
+        Ok(Self { origin, scope })
     }
 
     fn request(&self, request: Request, abort: &AbortController) -> Result<web_sys::Request> {
@@ -61,7 +70,7 @@ impl Browser {
         options.set_signal(Some(&abort.signal()));
         options.set_body(&JsValue::from_str(&request.body().to_string()));
         let request = web_sys::Request::new_with_str_and_init(
-            &format!("{}{}", self.origin, request.path()),
+            &format!("{}{}", self.origin, self.scope.path(request)),
             &options,
         )
         .map_err(|_| Error::Network)?;
@@ -236,6 +245,57 @@ mod tests {
         let mut invalid = configuration();
         invalid.origin = "http://alpha.example.test".into();
         assert!(Browser::new(&invalid).is_err());
+    }
+
+    #[wasm_bindgen_test]
+    async fn wallet_browser_keeps_the_original_privacy_and_fixed_path_boundary() {
+        let signer =
+            csgn::Signer::new("wallet", csgn::SecretKey::from_seed(&mut [72; 32]), 0, 1000)
+                .unwrap();
+        let configuration = cchr::Configuration {
+            origin: "https://wallet.example.test".into(),
+            community: "wallet".into(),
+            key_ring: signer.key_ring().to_cbor(),
+            minimum_revision: 1,
+            ring_revision: 0,
+        };
+        let browser = Browser::wallet(&configuration).unwrap();
+        let abort = AbortOnDrop(AbortController::new().unwrap());
+        let signal = abort.0.signal();
+        let request = browser.request(feed_request(), &abort.0).unwrap();
+        assert_eq!(
+            request.url(),
+            "https://wallet.example.test/v1/wallet_trust_feed"
+        );
+        assert_eq!(request.credentials(), RequestCredentials::Omit);
+        assert_eq!(request.redirect(), RequestRedirect::Error);
+        assert_eq!(request.cache(), RequestCache::NoStore);
+        assert_eq!(request.referrer_policy(), ReferrerPolicy::NoReferrer);
+        assert!(request.headers().get("Authorization").unwrap().is_none());
+        assert!(request.headers().get("Cookie").unwrap().is_none());
+        assert_eq!(
+            JsFuture::from(request.text().unwrap())
+                .await
+                .unwrap()
+                .as_string()
+                .unwrap(),
+            "{}"
+        );
+        drop(abort);
+        assert!(signal.aborted());
+        let wrong_scope = cchr::Configuration {
+            community: "alpha".into(),
+            ..configuration.clone()
+        };
+        assert!(matches!(
+            Browser::wallet(&wrong_scope),
+            Err(Error::Configuration)
+        ));
+        let wrong_origin = cchr::Configuration {
+            origin: "http://localhost".into(),
+            ..configuration
+        };
+        assert!(Browser::wallet(&wrong_origin).is_err());
     }
 
     #[wasm_bindgen_test]
