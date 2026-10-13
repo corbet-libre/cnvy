@@ -45,6 +45,17 @@ impl Http {
             crate::FeedScope::wallet(configuration)?,
         )
     }
+    /// Fetch the feed of a fingerprint-anchored community: no key material is
+    /// configured, only where the feed lives. The Charter built with
+    /// `cchr::Charter::from_fingerprint` decides what the bytes are worth.
+    pub fn for_origin(origin: &str, community: &str, roots: &[Vec<u8>]) -> Result<Self> {
+        let origin =
+            cchr::Charter::from_fingerprint(origin.to_owned(), community.to_owned(), [0; 32], 1)
+                .map_err(Error::Trust)?
+                .origin()
+                .to_owned();
+        Self::connect(origin, roots, crate::FeedScope::Community)
+    }
     fn configured(
         configuration: &cchr::Configuration,
         roots: &[Vec<u8>],
@@ -55,6 +66,9 @@ impl Http {
             .map_err(Error::Trust)?
             .origin()
             .to_owned();
+        Self::connect(origin, roots, scope)
+    }
+    fn connect(origin: String, roots: &[Vec<u8>], scope: crate::FeedScope) -> Result<Self> {
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())

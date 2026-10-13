@@ -379,3 +379,11 @@ async fn valid_tls_does_not_authorize_a_forged_publishing_ring() {
     assert!(assurance.current(NOW).is_err());
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn a_fingerprint_anchored_community_needs_only_an_https_origin() {
+    assert!(Http::for_origin("https://one.example.test", "one", &[]).is_ok());
+    assert!(Http::for_origin("http://one.example.test", "one", &[]).is_err());
+    assert!(Http::for_origin("https://one.example.test/path", "one", &[]).is_err());
+    assert!(Http::for_origin("https://one.example.test", "", &[]).is_err());
+}
