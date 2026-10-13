@@ -50,6 +50,19 @@ impl Browser {
     pub fn wallet(configuration: &cchr::Configuration) -> Result<Self> {
         Self::configured(configuration, crate::FeedScope::wallet(configuration)?)
     }
+    /// Fetch the feed of a fingerprint-anchored community: no key material is
+    /// configured, only where the feed lives (the native `Http::for_origin` twin).
+    pub fn for_origin(origin: &str, community: &str) -> Result<Self> {
+        let origin =
+            cchr::Charter::from_fingerprint(origin.to_owned(), community.to_owned(), [0; 32], 1)
+                .map_err(Error::Trust)?
+                .origin()
+                .to_owned();
+        Ok(Self {
+            origin,
+            scope: crate::FeedScope::Community,
+        })
+    }
     fn configured(configuration: &cchr::Configuration, scope: crate::FeedScope) -> Result<Self> {
         let origin = cchr::Charter::new(configuration.clone())
             .map_err(Error::Trust)?
