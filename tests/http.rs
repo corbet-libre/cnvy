@@ -102,6 +102,102 @@ async fn real_https_fetch_bootstraps_without_member_headers_or_redirects() {
     assert!(!trace.contains("referer:"));
     assert!(trace.ends_with("{}"));
 }
+
+#[tokio::test]
+async fn wallet_uses_fixed_https_paths_with_the_original_follower_and_charter() {
+    let mut signer = csgn::Signer::new(
+        "wallet",
+        csgn::SecretKey::from_seed(&mut [72; 32]),
+        NOW - 1,
+        1000,
+    )
+    .unwrap();
+    // The existing signed fixture codec is retained. Each original scope field
+    // is changed before signing the exact wallet-scoped document, never during
+    // receipt or verification by the original Follower/Charter.
+    let mut wire = feed(&mut signer, 10, 1);
+    replace(
+        &mut signer,
+        &mut wire,
+        "manifest",
+        csgn::Kind::SettingsSnapshot,
+        |body| body["community"] = serde_json::json!("wallet"),
+    );
+    for (name, kind) in [
+        ("settings", csgn::Kind::SettingsSnapshot),
+        ("schema", csgn::Kind::SchemaSnapshot),
+        ("schema_versions", csgn::Kind::SchemaSnapshot),
+        ("communities", csgn::Kind::CommunitiesSnapshot),
+        ("revocations", csgn::Kind::RevocationListSnapshot),
+    ] {
+        replace(&mut signer, &mut wire, name, kind, |body| {
+            body["community"] = serde_json::json!("wallet");
+            match name {
+                "schema" => body["content"]["community"] = serde_json::json!("wallet"),
+                "schema_versions" => {
+                    body["content"]["versions"][0]["schema"]["community"] =
+                        serde_json::json!("wallet");
+                }
+                "communities" => body["content"] = serde_json::json!(["wallet"]),
+                _ => {}
+            }
+        });
+    }
+    let content = bytes(&wire);
+    let mut reply = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        content.len()
+    )
+    .into_bytes();
+    reply.extend_from_slice(&content);
+    let (origin, root, first_server) = server(reply).await;
+    let wallet_configuration = cnvy::cchr::Configuration {
+        origin,
+        community: "wallet".into(),
+        key_ring: signer.key_ring().to_cbor(),
+        minimum_revision: 1,
+        ring_revision: 0,
+    };
+    let http = Http::wallet_with_roots(&wallet_configuration, &[root]).unwrap();
+    let mut driver = Assurance::configured(wallet_configuration.clone(), config()).unwrap();
+    let request = driver.start(NOW).unwrap();
+    let response = http.execute(request, NOW).await.unwrap();
+    driver.on_feed(request.id(), response.bytes(), NOW).unwrap();
+    assert_eq!(driver.current(NOW).unwrap().community(), "wallet");
+    let trace = first_server.await.unwrap().to_lowercase();
+    assert!(trace.starts_with("post /v1/wallet_trust_feed http/1.1"));
+    assert!(!trace.contains("authorization:"));
+    assert!(!trace.contains("cookie:"));
+    assert!(!trace.contains("referer:"));
+    assert!(trace.ends_with("{}"));
+
+    let content = br#"{"revision":10,"policy_epoch":1,"changed":false}"#;
+    let mut reply = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        content.len()
+    )
+    .into_bytes();
+    reply.extend_from_slice(content);
+    let (origin, root, second_server) = server(reply).await;
+    let wallet_configuration = cnvy::cchr::Configuration {
+        origin,
+        ..wallet_configuration
+    };
+    let http = Http::wallet_with_roots(&wallet_configuration, &[root]).unwrap();
+    let mut driver = Assurance::configured(wallet_configuration, config()).unwrap();
+    let initial = driver.start(NOW).unwrap();
+    driver.on_feed(initial.id(), &bytes(&wire), NOW).unwrap();
+    let poll = driver.next(NOW + 2).unwrap().unwrap();
+    let response = http.execute(poll, NOW + 2).await.unwrap();
+    driver
+        .on_announcement(poll.id(), response.bytes(), NOW + 2)
+        .unwrap();
+    assert_eq!(driver.current(NOW + 2).unwrap().revision(), 10);
+    let trace = second_server.await.unwrap().to_lowercase();
+    assert!(trace.starts_with("post /v1/wallet_trust_changes http/1.1"));
+    assert!(trace.ends_with(r#"{"revision":10}"#));
+    assert!(Http::wallet(&configuration("https://localhost", "alpha")).is_err());
+}
 #[tokio::test]
 async fn redirect_and_oversize_responses_are_refused() {
     for reply in [b"HTTP/1.1 307 Temporary Redirect\r\nLocation: https://127.0.0.1:9/\r\nContent-Length: 0\r\n\r\n".to_vec(),
@@ -282,4 +378,12 @@ async fn valid_tls_does_not_authorize_a_forged_publishing_ring() {
     );
     assert!(assurance.current(NOW).is_err());
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_fingerprint_anchored_community_needs_only_an_https_origin() {
+    assert!(Http::for_origin("https://one.example.test", "one", &[]).is_ok());
+    assert!(Http::for_origin("http://one.example.test", "one", &[]).is_err());
+    assert!(Http::for_origin("https://one.example.test/path", "one", &[]).is_err());
+    assert!(Http::for_origin("https://one.example.test", "", &[]).is_err());
 }

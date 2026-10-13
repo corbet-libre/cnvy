@@ -35,3 +35,33 @@ LGPL-3.0-only WITH LGPL-3.0-linking-exception. No registry publication.
 Publishing authority is supplied through per-community deployment configuration.
 HTTPS returns bytes only; Charter verifies the configured root, original signed
 ring continuity and revision floors. No feed response can authorize its own ring.
+
+## Balance material follows the existing feed
+
+Envoy transports the extra Balance snapshot without inspecting, transforming or
+verifying it. Charter verifies the manifest-bound kind and retains its floor.
+A stripped or invalid Balance document follows the ordinary failed-refresh and
+readiness rules; no second endpoint or member identifier is introduced. Shared
+native/Wasm vectors exercise original signed bytes, a required-kind downgrade,
+and recovery through the same fetch route.
+
+## Browser transport
+
+Optional `browser::Browser::new(&cchr::Configuration)` uses the original exact
+HTTPS origin and `execute(feed::Request, now)` returns `Received::bytes()` for
+Follower/Charter. It preserves raw JSON, including duplicate keys, for the
+original strict parser. No request-selected URL, parsed trust DTO, cookies,
+bearer or automatic redirect/retry is accepted.
+
+The adapter reuses maintained web-sys Fetch bindings, wasm-streams0.7 and
+gloo-timers0.4. A simple whole-body Fetch helper would allocate before enforcing
+the feed limit; this adapter consumes the maintained stream incrementally and
+aborts on size/deadline/drop. Native reqwest transport remains available under
+`http`. API sources: https://docs.rs/wasm-streams/latest/wasm_streams/ and
+https://docs.rs/gloo-timers/latest/gloo_timers/ . No transport/crypto is rewritten.
+
+The source targets browser windows and isolated iframes. Real browser Request,
+AbortController and stream/refusal vectors are written but unexecuted. Full
+HTTPS/CORS, redirect, slow-stream cancellation and original signed-feed install
+must still run against a real fixture with authenticated TLS on remote CI;
+native HTTPS results do not establish this browser transport's acceptance.

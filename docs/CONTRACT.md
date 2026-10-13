@@ -40,7 +40,23 @@ Charter; every later ring requires an original csgn transition signed by the
 installed predecessor. Envoy passes bytes unchanged to `Charter::install`.
 Browser adapters must authenticate the configured origin, reject redirects and
 bypass body caches, while leaving all publishing authority checks to Charter.
-No TLS deployment or browser networking runtime is shipped.
+The optional `browser` feature supplies `browser::Browser` in a Window/isolated
+iframe. Its constructor takes the same Charter Configuration; execute accepts
+only the original Follower Request and trusted now, then returns bounded raw
+Received bytes. Fetch omits credentials/referrer, refuses redirects, bypasses
+caches and streams each Uint8Array within the original feed/announcement bound.
+An AbortController aborts on future drop or the original request deadline.
+Follower still rejects obsolete completions; Charter alone authenticates bytes.
+Worker networking and TLS deployment remain embedding responsibilities.
+
+The isolated literal `wallet` publisher uses `Http::wallet` /
+`wallet_with_roots` and `Browser::wallet`. These explicit constructors require
+`Configuration.community == "wallet"` and retain the same Charter, follower,
+origin validation and transport privacy. They select only the fixed public
+`/v1/wallet_trust_feed` and `/v1/wallet_trust_changes` paths. The request body,
+operation generation and deadline stay unchanged; the caller cannot supply a
+path. Community constructors keep their existing paths. This routing selection
+does not authenticate a wallet member or grant any custody operation.
 
 ## States and failure semantics
 
@@ -101,6 +117,15 @@ signature and the profile, then delegates rich policy to Rulebook. These capture
 verify byte preservation; they do not assert admission without a valid bundle.
 Charter and Assurance separately execute actual door-authorized device bundles
 through Guard on native and wasm. Production forum wiring remains downstream.
-Production publishing-root provisioning and TLS setup, browser transport and embedding
+Production publishing-root provisioning and TLS setup, browser qualification and embedding
 cancellation/scheduling are adapter integration responsibilities. No deployment,
 registry publication, payments or external test accounts are involved.
+
+## Balance material follows the existing feed
+
+Envoy transports the extra Balance snapshot without inspecting, transforming or
+verifying it. Charter verifies the manifest-bound kind and retains its floor.
+A stripped or invalid Balance document follows the ordinary failed-refresh and
+readiness rules; no second endpoint or member identifier is introduced. Shared
+native/Wasm vectors exercise original signed bytes, a required-kind downgrade,
+and recovery through the same fetch route.
