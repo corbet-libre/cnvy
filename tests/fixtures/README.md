@@ -28,3 +28,5 @@ It is not derived from the returned `key_ring`. Only the public verification
 ring is captured; the synthetic private seed is not part of this artifact.
 
 Balance material: `balance-material.json` is the original public output of cblc b7449bdd32e884cfe29eff3bdbf787577bdda545, CI 36936767652, SHA-256 bb013abe6ce3e3f0e8c45481ced22e6cd099361b635af4b95c555511112e4f55. Its configuredFixtureRing is a separately supplied fictional test anchor. The activated issuer produced the material and real extension proof replay verified its artifact bindings. Tests which alter routing metadata explicitly re-sign with their test publisher; that tests feed authentication, not a new proof or record-currentness verdict.
+
+`balance-material-v2.json` is the cplc canonical v2 balance material (the v1 capture above no longer parses: `admissionPolicyDigest` and `extensionPolicy.standingPolicyDigest` are required). It carries the cblc test standing digest and is re-signed with the unchanged fictional fixture key; the follower test re-signs it again with its own publisher.

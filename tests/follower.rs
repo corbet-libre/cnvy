@@ -31,7 +31,7 @@ fn balance_follows_the_same_feed_and_a_stripped_kind_cannot_restore_readiness() 
     let mut signer = signer();
     let mut original = feed(&mut signer, 10, 1);
     let fixture: serde_json::Value =
-        serde_json::from_slice(include_bytes!("fixtures/balance-material.json")).unwrap();
+        serde_json::from_slice(include_bytes!("fixtures/balance-material-v2.json")).unwrap();
     let mut material = fixture["material"].clone();
     material["community"] = serde_json::json!("alpha");
     let signed = sign(&mut signer, csgn::Kind::SettingsSnapshot, material);
