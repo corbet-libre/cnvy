@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "Envoy: bounded authenticated community trust-feed follower"
 license = "LGPL-3.0-only WITH LGPL-3.0-linking-exception"
-repository = "https://git.corbet.ch/corbet-foss/cnvy.git"
+repository = "https://git.corbet.ch/corbet-libre/cnvy.git"
 publish = false
 
 [features]
@@ -14,7 +14,7 @@ http = ["dep:reqwest"]
 browser = ["dep:web-sys", "dep:js-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:wasm-streams", "dep:gloo-timers", "dep:futures-util"]
 
 [dependencies]
-cchr = { git = "https://git.corbet.ch/corbet-foss/cchr.git", branch = "main" }
+cchr = { git = "https://git.corbet.ch/corbet-libre/cchr.git", branch = "main" }
 serde = { version = "1", features = ["derive"] }
 schemars = "1"
 serde_json = "1"
@@ -32,7 +32,7 @@ futures-util = { version = "0.3", optional = true }
 web-sys = { version = "0.3", optional = true, features = ["Window", "Request", "RequestInit", "RequestCredentials", "RequestRedirect", "RequestCache", "RequestMode", "ReferrerPolicy", "Headers", "Response", "ReadableStream", "AbortController", "AbortSignal"] }
 
 [dev-dependencies]
-csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", default-features = false, features = ["volatile-signer"] }
+csgn = { git = "https://git.corbet.ch/corbet-libre/csgn.git", branch = "main", default-features = false, features = ["volatile-signer"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
