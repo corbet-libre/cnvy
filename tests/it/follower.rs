@@ -1,10 +1,9 @@
-mod support;
+use crate::support::Driver as Assurance;
+use crate::support::*;
 use cnvy::{
     Error,
     feed::{Action, Config, State},
 };
-use support::Driver as Assurance;
-use support::*;
 fn config() -> Config {
     Config {
         refresh_seconds: 40,
@@ -31,7 +30,7 @@ fn balance_follows_the_same_feed_and_a_stripped_kind_cannot_restore_readiness() 
     let mut signer = signer();
     let mut original = feed(&mut signer, 10, 1);
     let fixture: serde_json::Value =
-        serde_json::from_slice(include_bytes!("fixtures/balance-material-v2.json")).unwrap();
+        serde_json::from_slice(include_bytes!("../fixtures/balance-material-v2.json")).unwrap();
     let mut material = fixture["material"].clone();
     material["community"] = serde_json::json!("alpha");
     let signed = sign(&mut signer, csgn::Kind::SettingsSnapshot, material);

@@ -1,9 +1,8 @@
 #![cfg(all(feature = "http", not(target_arch = "wasm32")))]
-mod support;
+use crate::support::Driver as Assurance;
+use crate::support::*;
 use cnvy::{Error, feed::Config, http::Http};
 use std::sync::Arc;
-use support::Driver as Assurance;
-use support::*;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,

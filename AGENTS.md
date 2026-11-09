@@ -16,7 +16,7 @@ Land: `cargo fmt` in touched repos, rebase on main (never force-push),
 
 Invariants (rule -> enforcing test):
 - A stripped or invalid kind can never restore readiness
-  -> `tests/follower.rs::balance_follows_the_same_feed_and_a_stripped_kind_cannot_restore_readiness`
+  -> `tests/it/follower.rs::balance_follows_the_same_feed_and_a_stripped_kind_cannot_restore_readiness`
 - Epoch hints bounded to the next verified epoch; malformed feeds never become trust
   -> `::arbitrary_epoch_hint_is_bounded_by_the_next_verified_epoch`, `::malformed_announcements_and_corrupt_feed_cannot_become_trust`
 - One bounded operation; retry storms and obsolete completions fenced
@@ -24,7 +24,7 @@ Invariants (rule -> enforcing test):
 - Clock regression fences pending work, recovers at high water
   -> `::clock_regression_fences_pending_and_recovers_at_high_water`
 - HTTPS: exact origin only, no redirects/credentials, chunked bounds; a forged ring never authorizes
-  -> `tests/http.rs::real_https_fetch_bootstraps_without_member_headers_or_redirects`, `::redirect_and_oversize_responses_are_refused`, `::valid_tls_does_not_authorize_a_forged_publishing_ring`
+  -> `tests/it/http.rs::real_https_fetch_bootstraps_without_member_headers_or_redirects`, `::redirect_and_oversize_responses_are_refused`, `::valid_tls_does_not_authorize_a_forged_publishing_ring`
 
 Pointers: `src/feed.rs`, `src/http.rs`, `src/browser.rs`, `docs/CONTRACT.md`, `docs/COVERAGE.md`.
 Commits: explicit paths, imperative, author per `~/agents/AGENT.md`; no AI trailers.

@@ -1,40 +1,39 @@
-mod support;
+use crate::support::Driver as Assurance;
 use cnvy::{
     Error,
     cchr::{Configuration, Error as TrustError, Kind},
     feed::{Action, Config},
 };
 use serde_json::Value;
-use support::Driver as Assurance;
 const NOW: u64 = 1_800_000_003;
 const ORIGIN: &str = "https://alpha.example.test";
-const INITIAL: &[u8] = include_bytes!("fixtures/initial.json");
-const ORDINARY: &[u8] = include_bytes!("fixtures/ordinary.json");
+const INITIAL: &[u8] = include_bytes!("../fixtures/initial.json");
+const ORDINARY: &[u8] = include_bytes!("../fixtures/ordinary.json");
 const UPDATES: [(&[u8], &[u8]); 5] = [
     (
-        include_bytes!("fixtures/all-announcement.json"),
-        include_bytes!("fixtures/all.json"),
+        include_bytes!("../fixtures/all-announcement.json"),
+        include_bytes!("../fixtures/all.json"),
     ),
     (
-        include_bytes!("fixtures/any-announcement.json"),
-        include_bytes!("fixtures/any.json"),
+        include_bytes!("../fixtures/any-announcement.json"),
+        include_bytes!("../fixtures/any.json"),
     ),
     (
-        include_bytes!("fixtures/threshold-announcement.json"),
-        include_bytes!("fixtures/threshold.json"),
+        include_bytes!("../fixtures/threshold-announcement.json"),
+        include_bytes!("../fixtures/threshold.json"),
     ),
     (
-        include_bytes!("fixtures/schema-announcement.json"),
-        include_bytes!("fixtures/schema.json"),
+        include_bytes!("../fixtures/schema-announcement.json"),
+        include_bytes!("../fixtures/schema.json"),
     ),
     (
-        include_bytes!("fixtures/revoked-announcement.json"),
-        include_bytes!("fixtures/revoked.json"),
+        include_bytes!("../fixtures/revoked-announcement.json"),
+        include_bytes!("../fixtures/revoked.json"),
     ),
 ];
 fn configuration() -> Configuration {
     let config: Value =
-        serde_json::from_slice(include_bytes!("fixtures/publishing-root.json")).unwrap();
+        serde_json::from_slice(include_bytes!("../fixtures/publishing-root.json")).unwrap();
     Configuration {
         origin: ORIGIN.into(),
         community: "alpha".into(),
